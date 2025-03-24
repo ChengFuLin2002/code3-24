@@ -7,53 +7,54 @@ class GameServer:
         self.host = host
         self.port = port
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # 避免埠被佔用
         self.server_socket.bind((self.host, self.port))
-        self.clients = []  # 存放兩名玩家的 socket
+        self.clients = []  # 存放玩家的 socket
         self.players = {}  # 存放玩家角色資料
-        
+
     def start(self):
-        self.server_socket.listen(2)
+        self.server_socket.listen(1)
         print("伺服器已啟動，等待玩家連線...")
 
-        # 伺服器作為玩家1
-        self.clients.append(self.server_socket.accept()[0])
-        print("玩家1（伺服器）已準備好")
-        self.send_message(self.clients[0], "你是玩家1，請選擇職業: \n1) 戰士\n2) 法師")
+        # **讓 Server（玩家1）選擇角色**
+        print("你是玩家1，請選擇職業: \n1) 戰士\n2) 法師")
+        p1_choice = input("請輸入你的選擇 (1 或 2): ").strip()
+        p1_class = "戰士" if p1_choice == "1" else "法師"
+        self.players["玩家1"] = create_character(p1_class, "玩家1")
+        print(f"你選擇了 {p1_class}！")
 
-        # 讓玩家1（server）選擇職業
-        p1_choice = self.receive_message(self.clients[0])
-        self.players[self.clients[0]] = create_character("戰士" if p1_choice == "1" else "法師", "玩家1")
-
-        # 等待玩家2 連線
+        # **等待玩家2 連線**
         client_socket, client_address = self.server_socket.accept()
         self.clients.append(client_socket)
         print(f"玩家2（Client）連線成功: {client_address}")
         self.send_message(client_socket, "你是玩家2，請選擇職業: \n1) 戰士\n2) 法師")
 
-        # 讓玩家2（client）選擇職業
+        # **讓玩家2（Client）選擇職業**
         p2_choice = self.receive_message(client_socket)
-        self.players[client_socket] = create_character("戰士" if p2_choice == "1" else "法師", "玩家2")
+        p2_class = "戰士" if p2_choice == "1" else "法師"
+        self.players["玩家2"] = create_character(p2_class, "玩家2")
 
-        # 通知雙方遊戲開始
-        self.send_message(self.clients[0], f"遊戲開始！你的對手是 {self.players[self.clients[1]].name}")
-        self.send_message(self.clients[1], f"遊戲開始！你的對手是 {self.players[self.clients[0]].name}")
+        # **通知雙方遊戲開始**
+        self.send_message(client_socket, f"遊戲開始！你的對手是 {self.players['玩家1'].name}")
+        print(f"遊戲開始！你的對手是 {self.players['玩家2'].name}")
 
-        # 進入戰鬥
+        # **開始戰鬥**
         self.battle()
 
     def battle(self):
         player_turn = 0  # 0: 玩家1, 1: 玩家2
+        player_names = ["玩家1", "玩家2"]
 
         while all(player.health > 0 for player in self.players.values()):
-            attacker_socket = self.clients[player_turn]
-            defender_socket = self.clients[1 - player_turn]
-            attacker = self.players[attacker_socket]
-            defender = self.players[defender_socket]
+            attacker = self.players[player_names[player_turn]]
+            defender = self.players[player_names[1 - player_turn]]
 
-            self.send_message(attacker_socket, "你的回合！選擇行動:\n1) 普通攻擊\n2) 使用技能")
-            self.send_message(defender_socket, "等待對手行動...")
-
-            action = self.receive_message(attacker_socket)
+            if player_turn == 0:
+                print("你的回合！選擇行動:\n1) 普通攻擊\n2) 使用技能")
+                action = input("請輸入你的選擇 (1 或 2): ").strip()
+            else:
+                self.send_message(self.clients[0], "你的回合！選擇行動:\n1) 普通攻擊\n2) 使用技能")
+                action = self.receive_message(self.clients[0])
 
             if action == "1":
                 damage = attacker.attack(defender)
@@ -65,12 +66,15 @@ class GameServer:
                 continue
 
             print(battle_log)
-            self.send_message(attacker_socket, battle_log)
-            self.send_message(defender_socket, battle_log)
+            if player_turn == 1:
+                self.send_message(self.clients[0], battle_log)
 
             if defender.health <= 0:
-                self.send_message(attacker_socket, f"恭喜！你擊敗了 {defender.name}！")
-                self.send_message(defender_socket, "你被擊敗了！")
+                if player_turn == 0:
+                    print(f"恭喜！你擊敗了 {defender.name}！")
+                else:
+                    self.send_message(self.clients[0], f"恭喜！你擊敗了 {defender.name}！")
+                    self.send_message(self.clients[0], "你被擊敗了！")
                 break
 
             player_turn = 1 - player_turn  # 切換回合
