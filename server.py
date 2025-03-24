@@ -1,8 +1,5 @@
 import socket
 import threading
-import random
-import time
-import datetime
 from characters import create_character
 
 class GameServer:
@@ -22,21 +19,30 @@ class GameServer:
             client_socket, client_address = self.server_socket.accept()
             self.clients.append(client_socket)
             print(f"玩家連線: {client_address}")
-            self.send_message(client_socket, f"你是 {'小明' if len(self.clients) == 1 else '小美'}，等待對手加入...")
-            
+            self.send_message(client_socket, f"你是 {'玩家 1' if len(self.clients) == 1 else '玩家 2'}，請選擇你的職業: \n1) 戰士 \n2) 法師")
+
         self.setup_game()
 
     def setup_game(self):
-        self.players[self.clients[0]] = create_character("戰士", "小明")
-        self.players[self.clients[1]] = create_character("法師", "小美")
-        
-        self.send_message(self.clients[0], "遊戲開始！你的對手是 小美！")
-        self.send_message(self.clients[1], "遊戲開始！你的對手是 小明！")
+        for i, client in enumerate(self.clients):
+            chosen_class = self.receive_message(client)
+            if chosen_class == "1":
+                self.players[client] = create_character("戰士", f"玩家 {i+1}")
+                self.send_message(client, "你選擇了戰士！")
+            elif chosen_class == "2":
+                self.players[client] = create_character("法師", f"玩家 {i+1}")
+                self.send_message(client, "你選擇了法師！")
+            else:
+                self.send_message(client, "輸入錯誤，請選擇 1 或 2")
+                return self.setup_game()  # 重新選擇
+
+        self.send_message(self.clients[0], "遊戲開始！你的對手是 " + self.players[self.clients[1]].name)
+        self.send_message(self.clients[1], "遊戲開始！你的對手是 " + self.players[self.clients[0]].name)
         
         self.battle()
 
     def battle(self):
-        player_turn = 0  # 0: 小明, 1: 小美
+        player_turn = 0  # 0: 玩家1, 1: 玩家2
         
         while all(player.health > 0 for player in self.players.values()):
             attacker_socket = self.clients[player_turn]
@@ -81,4 +87,3 @@ class GameServer:
 if __name__ == "__main__":
     server = GameServer()
     server.start()
-
