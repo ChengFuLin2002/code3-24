@@ -11,106 +11,73 @@ class GameServer:
         self.port = port
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.bind((self.host, self.port))
-        self.clients = []
+        self.clients = []  # 存放兩名玩家的 socket
+        self.players = {}  # 存放玩家角色資料
         
     def start(self):
-        self.server_socket.listen(5)
-        print(f"伺服器已啟動，等待玩家連線...")
+        self.server_socket.listen(2)
+        print("伺服器已啟動，等待兩名玩家連線...")
         
-        while True:
+        while len(self.clients) < 2:
             client_socket, client_address = self.server_socket.accept()
+            self.clients.append(client_socket)
             print(f"玩家連線: {client_address}")
-            client_thread = threading.Thread(target=self.handle_client, args=(client_socket, client_address))
-            client_thread.start()
+            self.send_message(client_socket, f"你是 {'小明' if len(self.clients) == 1 else '小美'}，等待對手加入...")
             
-    def handle_client(self, client_socket, client_address):
-        try:
-            # 發送歡迎訊息
-            self.send_message(client_socket, "歡迎來到回合制戰鬥！")
-            
-            # 讓玩家選擇角色
-            self.send_message(client_socket, "請選擇你的角色:")
-            self.send_message(client_socket, "1) 戰士")
-            self.send_message(client_socket, "2) 法師")
-            
-            choice = self.receive_message(client_socket)
-            player_character_type = "戰士" if choice == "1" else "法師"
-            player_character = create_character(player_character_type, "小明")
-            
-            # AI 選擇角色
-            ai_character = create_character("戰士", "小美")
-            
-            self.send_message(client_socket, f"你選擇了 {player_character_type}，你的對手是 {ai_character.name}！")
-            self.send_message(client_socket, "遊戲開始！")
-            
-            # 記錄開始時間
-            start_time = datetime.datetime.now()
-            print(f"=== 遊戲開始 ({start_time.strftime('%Y-%m-%d %H:%M:%S')}) ===")
-            print(f"玩家連線自 {client_address}")
-            print(f"玩家選擇: {player_character_type}, 對手是 {ai_character.name}")
-            
-            # 開始戰鬥
-            self.battle(client_socket, player_character, ai_character)
-            
-            print(f"=== 遊戲結束 ===")
-            
-        except Exception as e:
-            print(f"處理客戶端時出錯: {e}")
-        finally:
-            client_socket.close()
-            
-    def battle(self, client_socket, player, ai):
-        player_turn = True
+        self.setup_game()
+
+    def setup_game(self):
+        self.players[self.clients[0]] = create_character("戰士", "小明")
+        self.players[self.clients[1]] = create_character("法師", "小美")
         
-        while player.health > 0 and ai.health > 0:
-            if player_turn:
-                # 小明回合
-                self.send_message(client_socket, "小明回合！選擇行動:")
-                self.send_message(client_socket, "1) 普通攻擊")
-                self.send_message(client_socket, "2) 使用技能")
-                
-                action = self.receive_message(client_socket)
-                
-                if action == "1":
-                    damage = player.attack(ai)
-                    battle_log = f"[小明回合] 小明 對 {ai.name} 造成 {damage} 點傷害！"
-                    self.send_message(client_socket, battle_log)
-                    self.send_message(client_socket, f"對方剩餘血量: {ai.health}")
-                elif action == "2":
-                    damage = player.use_skill(ai)
-                    if damage > 0:
-                        battle_log = f"[小明回合] 小明 使用 [猛擊]，對 {ai.name} 造成 {damage} 傷害！(MP -10)"
-                        self.send_message(client_socket, battle_log)
-                        self.send_message(client_socket, f"對方剩餘血量: {ai.health}")
-                    else:
-                        self.send_message(client_socket, "小明 MP 不足，無法使用 [猛擊]！")
+        self.send_message(self.clients[0], "遊戲開始！你的對手是 小美！")
+        self.send_message(self.clients[1], "遊戲開始！你的對手是 小明！")
+        
+        self.battle()
+
+    def battle(self):
+        player_turn = 0  # 0: 小明, 1: 小美
+        
+        while all(player.health > 0 for player in self.players.values()):
+            attacker_socket = self.clients[player_turn]
+            defender_socket = self.clients[1 - player_turn]
+            attacker = self.players[attacker_socket]
+            defender = self.players[defender_socket]
+            
+            self.send_message(attacker_socket, "你的回合！選擇行動:\n1) 普通攻擊\n2) 使用技能")
+            self.send_message(defender_socket, "等待對手行動...")
+            
+            action = self.receive_message(attacker_socket)
+            
+            if action == "1":
+                damage = attacker.attack(defender)
+                battle_log = f"[{attacker.name} 回合] {attacker.name} 對 {defender.name} 造成 {damage} 點傷害！"
+            elif action == "2":
+                damage = attacker.use_skill(defender)
+                battle_log = f"[{attacker.name} 回合] {attacker.name} 使用技能，對 {defender.name} 造成 {damage} 傷害！" if damage > 0 else f"[{attacker.name} 回合] {attacker.name} MP 不足，無法使用技能！"
             else:
-                # 小美回合
-                time.sleep(1)
-                
-                ai_action = random.choice(["attack", "skill"])
-                
-                if ai_action == "attack" or ai.mana < 10:
-                    damage = ai.attack(player)
-                    battle_log = f"[小美回合] 小美 對 小明 造成 {damage} 點傷害！"
-                    self.send_message(client_socket, battle_log)
-                    self.send_message(client_socket, f"你剩餘血量: {player.health}")
-                else:
-                    damage = ai.use_skill(player)
-                    self.send_message(client_socket, f"[小美回合] 小美 使用 [猛擊]，對 小明 造成 {damage} 傷害！(MP -10)")
+                continue
             
-            player_turn = not player_turn
+            print(battle_log)
+            self.send_message(attacker_socket, battle_log)
+            self.send_message(defender_socket, battle_log)
             
-        winner = "小明勝利！" if player.health > 0 else "小美勝利！"
-        self.send_message(client_socket, winner)
-        print(winner)
+            if defender.health <= 0:
+                self.send_message(attacker_socket, f"恭喜！你擊敗了 {defender.name}！")
+                self.send_message(defender_socket, "你被擊敗了！")
+                break
             
+            player_turn = 1 - player_turn  # 切換回合
+        
+        print("遊戲結束！")
+        self.server_socket.close()
+
     def send_message(self, client_socket, message):
         client_socket.send(message.encode('utf-8'))
-        
+    
     def receive_message(self, client_socket):
         return client_socket.recv(1024).decode('utf-8').strip()
-        
+    
 if __name__ == "__main__":
     server = GameServer()
     server.start()
